@@ -1,0 +1,19 @@
+[package]
+name = "toydb"
+version = "0.1.0"
+edition = "2021"
+description = "A persistent key-value storage engine built from scratch in Rust (LSM-tree style)"
+license = "MIT"
+
+[lib]
+name = "toydb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "toydb-cli"
+path = "src/bin/toydb_cli.rs"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"
