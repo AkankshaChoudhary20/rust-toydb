@@ -3,7 +3,7 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::record::{read_record, write_record, Entry};
+use crate::record::{read_record_strict, write_record, Entry};
 
 /// An immutable, sorted, on-disk table produced by flushing a memtable (or by
 /// compacting older tables together). Entries are stored in ascending key order,
@@ -36,7 +36,7 @@ impl SSTable {
     pub fn get(path: &Path, key: &[u8]) -> Result<Option<Option<Vec<u8>>>> {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
-        while let Some((k, v)) = read_record(&mut reader)? {
+        while let Some((k, v)) = read_record_strict(&mut reader)? {
             if k.as_slice() == key {
                 return Ok(Some(v));
             }
@@ -53,7 +53,7 @@ impl SSTable {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let mut out = Vec::new();
-        while let Some(entry) = read_record(&mut reader)? {
+        while let Some(entry) = read_record_strict(&mut reader)? {
             out.push(entry);
         }
         Ok(out)
@@ -108,6 +108,25 @@ mod tests {
         assert_eq!(SSTable::get(&path, b"c").unwrap(), Some(Some(b"3".to_vec())));
         assert_eq!(SSTable::get(&path, b"z").unwrap(), None);
         assert_eq!(SSTable::get(&path, b"0").unwrap(), None);
+    }
+
+    #[test]
+    fn truncated_table_records_are_errors_not_missing_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("0000000000.sst");
+        for value in [Some(b"value".as_slice()), None] {
+            let mut encoded = Vec::new();
+            write_record(&mut encoded, b"key", value).unwrap();
+            for cut in 1..encoded.len() {
+                fs::write(&path, &encoded[..cut]).unwrap();
+                assert!(SSTable::load_all(&path).is_err(), "accepted partial record at {cut}");
+                assert!(SSTable::get(&path, b"key").is_err(), "lookup accepted partial record at {cut}");
+            }
+            fs::write(&path, &encoded).unwrap();
+            assert_eq!(SSTable::load_all(&path).unwrap(), vec![(b"key".to_vec(), value.map(|v| v.to_vec()))]);
+        }
+        fs::write(&path, []).unwrap();
+        assert!(SSTable::load_all(&path).unwrap().is_empty());
     }
 
     #[test]

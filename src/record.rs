@@ -40,6 +40,16 @@ pub fn write_record<W: Write>(w: &mut W, key: &[u8], value: Option<&[u8]>) -> io
 /// case the incomplete trailing record is silently discarded, which is the standard
 /// crash-recovery behavior for an append-only log.
 pub fn read_record<R: Read>(r: &mut R) -> io::Result<Option<Entry>> {
+    read_record_inner(r, true)
+}
+
+/// Immutable tables must end at a record boundary: a partial record is
+/// corruption, not an unacknowledged WAL tail that can be discarded.
+pub fn read_record_strict<R: Read>(r: &mut R) -> io::Result<Option<Entry>> {
+    read_record_inner(r, false)
+}
+
+fn read_record_inner<R: Read>(r: &mut R, allow_incomplete: bool) -> io::Result<Option<Entry>> {
     let mut op_buf = [0u8; 1];
     if !read_exact_or_eof(r, &mut op_buf)? {
         return Ok(None);
@@ -47,23 +57,23 @@ pub fn read_record<R: Read>(r: &mut R) -> io::Result<Option<Entry>> {
     let op = op_buf[0];
 
     let mut len_buf = [0u8; 4];
-    if !read_exact_or_eof(r, &mut len_buf)? {
+    if !read_field(r, &mut len_buf, allow_incomplete)? {
         return Ok(None);
     }
     let klen = u32::from_le_bytes(len_buf) as usize;
     let mut key = vec![0u8; klen];
-    if !read_exact_or_eof(r, &mut key)? {
+    if !read_field(r, &mut key, allow_incomplete)? {
         return Ok(None);
     }
 
     match op {
         OP_PUT => {
-            if !read_exact_or_eof(r, &mut len_buf)? {
+            if !read_field(r, &mut len_buf, allow_incomplete)? {
                 return Ok(None);
             }
             let vlen = u32::from_le_bytes(len_buf) as usize;
             let mut value = vec![0u8; vlen];
-            if !read_exact_or_eof(r, &mut value)? {
+            if !read_field(r, &mut value, allow_incomplete)? {
                 return Ok(None);
             }
             Ok(Some((key, Some(value))))
@@ -84,5 +94,14 @@ fn read_exact_or_eof<R: Read>(r: &mut R, buf: &mut [u8]) -> io::Result<bool> {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(false),
         Err(e) => Err(e),
+    }
+}
+
+fn read_field<R: Read>(r: &mut R, buf: &mut [u8], allow_incomplete: bool) -> io::Result<bool> {
+    if allow_incomplete {
+        read_exact_or_eof(r, buf)
+    } else {
+        r.read_exact(buf)?;
+        Ok(true)
     }
 }
