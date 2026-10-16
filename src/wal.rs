@@ -1,5 +1,5 @@
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
@@ -16,7 +16,23 @@ pub struct Wal {
 
 impl Wal {
     pub fn open(path: &Path) -> Result<Self> {
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(path)?;
+        // A crash can leave a partial final record. Remove it before appending,
+        // otherwise the next durable write would become part of that broken record.
+        let valid_length = {
+            let mut reader = BufReader::new(&file);
+            loop {
+                let start = reader.stream_position()?;
+                if read_record(&mut reader)?.is_none() {
+                    break start;
+                }
+            }
+        };
+        file.set_len(valid_length)?;
         Ok(Self {
             path: path.to_path_buf(),
             writer: BufWriter::new(file),
@@ -94,6 +110,41 @@ mod tests {
                 (b"a".to_vec(), None),
             ]
         );
+    }
+
+    #[test]
+    fn reopening_discards_partial_tail_before_new_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wal.log");
+        let mut encoded = Vec::new();
+        write_record(&mut encoded, b"partial", Some(b"value")).unwrap();
+        for cut in 1..encoded.len() {
+            {
+                let mut wal = Wal::open(&path).unwrap();
+                wal.reset().unwrap();
+                wal.append_put(b"before", b"1").unwrap();
+            }
+            OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(&encoded[..cut])
+                .unwrap();
+            {
+                let mut wal = Wal::open(&path).unwrap();
+                wal.append_put(b"after", b"2").unwrap();
+            }
+            let mut seen = Vec::new();
+            Wal::replay(&path, |k, v| seen.push((k, v))).unwrap();
+            assert_eq!(
+                seen,
+                vec![
+                    (b"before".to_vec(), Some(b"1".to_vec())),
+                    (b"after".to_vec(), Some(b"2".to_vec()))
+                ],
+                "partial length {cut}"
+            );
+        }
     }
 
     #[test]
