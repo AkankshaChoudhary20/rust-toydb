@@ -181,3 +181,9 @@ reopen).
 - Range-aware SSTable metadata (min/max key) to skip files during `get`/`scan`.
 - A simple transaction/batch API (atomic multi-key writes via a single WAL
   record).
+
+## Continuous integration
+
+CI runs `cargo test --locked` (including integration and documentation tests) and builds release binaries with the stable Rust toolchain.
+
+Checks run on pushes and pull requests and can be started manually from the Actions tab. The workflow has read-only repository permissions, cancels superseded runs, and stops after 15 minutes.
