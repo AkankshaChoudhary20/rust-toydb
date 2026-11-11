@@ -55,6 +55,11 @@ fn read_record_inner<R: Read>(r: &mut R, allow_incomplete: bool) -> io::Result<O
         return Ok(None);
     }
     let op = op_buf[0];
+    // Reject corrupt operations before interpreting their length fields.
+    if op != OP_PUT && op != OP_DELETE {
+        return Err(io::Error::new(io::ErrorKind::InvalidData,
+            format!("corrupt record: unknown op byte {}", op)));
+    }
 
     let mut len_buf = [0u8; 4];
     if !read_field(r, &mut len_buf, allow_incomplete)? {
@@ -83,6 +88,19 @@ fn read_record_inner<R: Read>(r: &mut R, allow_incomplete: bool) -> io::Result<O
             io::ErrorKind::InvalidData,
             format!("corrupt record: unknown op byte {}", other),
         )),
+    }
+}
+
+#[cfg(test)]
+mod invalid_operation_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_operation_is_not_silently_treated_as_incomplete_wal() {
+        let error = read_record(&mut &[255_u8][..]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        let error = read_record_strict(&mut &[255_u8, 255, 255, 255, 255][..]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 }
 
