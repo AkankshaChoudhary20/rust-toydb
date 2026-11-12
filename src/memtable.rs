@@ -60,7 +60,7 @@ impl MemTable {
         &'a self,
         prefix: &'a [u8],
     ) -> impl Iterator<Item = (&'a Vec<u8>, &'a Option<Vec<u8>>)> {
-        self.map.iter().filter(move |(k, _)| k.starts_with(prefix))
+        self.map.range(prefix.to_vec()..).take_while(move |(k, _)| k.starts_with(prefix))
     }
 }
 
@@ -82,6 +82,19 @@ mod tests {
         mt.delete(b"a".to_vec());
         assert_eq!(mt.get(b"a"), Some(None));
         assert!(!mt.is_empty());
+    }
+
+    #[test]
+    fn prefix_ranges_handle_binary_keys_and_tombstones() {
+        let mut mt = MemTable::new();
+        for key in [vec![0], vec![1], vec![255], vec![255, 0], vec![255, 255]] {
+            mt.put(key, vec![42]);
+        }
+        mt.delete(vec![255, 0]);
+        let entries: Vec<_> = mt.range_prefix(&[255]).map(|(k,v)| (k.clone(), v.clone())).collect();
+        assert_eq!(entries, vec![(vec![255], Some(vec![42])), (vec![255,0], None), (vec![255,255], Some(vec![42]))]);
+        assert_eq!(mt.range_prefix(&[]).count(), 5);
+        assert_eq!(mt.range_prefix(&[2]).count(), 0);
     }
 
     #[test]
