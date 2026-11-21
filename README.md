@@ -53,8 +53,10 @@ the target key.
 **Reads.** `get` checks the memtable first (most recent state), then falls
 back to SSTables from newest to oldest, returning the first match. `scan`
 merges every SSTable (oldest to newest) with the memtable on top, so later
-writes always shadow earlier ones, then filters by prefix and drops
-tombstones.
+writes always shadow earlier ones. Results contain live keys with the supplied
+byte prefix, in ascending byte order. An empty prefix returns all live keys.
+The scan reads the SSTables to build the merged view, so a narrow prefix can
+still require reading the full on-disk dataset.
 
 **Compaction.** Once the number of SSTable files exceeds a threshold, all of
 them are merged into a single new SSTable: for each key, only the most
