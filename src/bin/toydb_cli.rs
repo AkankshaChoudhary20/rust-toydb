@@ -44,18 +44,23 @@ fn main() {
             continue;
         }
 
-        let mut parts = line.splitn(3, ' ');
-        let cmd = parts.next().unwrap_or("").to_ascii_uppercase();
+        let (command, arguments) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+        let arguments = arguments.trim_start();
+        let cmd = command.to_ascii_uppercase();
+        let (key, value) = arguments
+            .split_once(char::is_whitespace)
+            .map_or((arguments, None), |(key, rest)| (key, Some(rest.trim_start())));
+        let key = (!key.is_empty()).then_some(key);
 
         match cmd.as_str() {
-            "SET" => match (parts.next(), parts.next()) {
+            "SET" => match (key, value) {
                 (Some(k), Some(v)) => match db.put(k.as_bytes(), v.as_bytes()) {
                     Ok(()) => println!("OK"),
                     Err(e) => println!("ERR {}", e),
                 },
                 _ => println!("usage: SET <key> <value>"),
             },
-            "GET" => match parts.next() {
+            "GET" => match key {
                 Some(k) => match db.get(k.as_bytes()) {
                     Ok(Some(v)) => println!("{}", String::from_utf8_lossy(&v)),
                     Ok(None) => println!("(nil)"),
@@ -63,7 +68,7 @@ fn main() {
                 },
                 None => println!("usage: GET <key>"),
             },
-            "DEL" => match parts.next() {
+            "DEL" => match key {
                 Some(k) => match db.delete(k.as_bytes()) {
                     Ok(()) => println!("OK"),
                     Err(e) => println!("ERR {}", e),
@@ -71,7 +76,7 @@ fn main() {
                 None => println!("usage: DEL <key>"),
             },
             "SCAN" => {
-                let prefix = parts.next().unwrap_or("");
+                let prefix = key.unwrap_or("");
                 match db.scan(prefix.as_bytes()) {
                     Ok(iter) => {
                         let mut count = 0;
